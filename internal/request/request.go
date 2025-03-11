@@ -4,15 +4,18 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/GhostVox/httptcp/internal/headers"
 	"io"
+	"strconv"
 	"strings"
+
+	"github.com/GhostVox/httptcp/internal/headers"
 )
 
 type Request struct {
 	RequestLine RequestLine
 	state       state
 	Headers     headers.Headers
+	Body        []byte
 }
 
 type RequestLine struct {
@@ -26,6 +29,7 @@ type state int
 const (
 	requestIntialized state = iota
 	requestStateParsingHeaders
+	requestParsingBody
 	requestDone
 )
 const buffSize int = 8
@@ -157,9 +161,30 @@ func (r *Request) parseSingle(data []byte) (int, error) {
 			return 0, err
 		}
 		if done {
-			r.state = requestDone
+			r.state = requestParsingBody
 		}
 		return bytesParsed, nil
+	case requestParsingBody:
+		contentLength := r.Headers.Get("Content-Length")
+		if contentLength == "" {
+			r.state = requestDone
+			return 0, nil
+		}
+		cLength, err := strconv.Atoi(contentLength)
+		if err != nil {
+			return 0, fmt.Errorf("invalid content-length: %s", contentLength)
+		}
+		fmt.Println("Content-Length: ", cLength, "data: ", data)
+		r.Body = append(r.Body, data...)
+		if len(r.Body) > cLength {
+			return 0, fmt.Errorf("body is larger than content-length")
+		}
+		if cLength == len(r.Body) {
+			r.state = requestDone
+		}
+		fmt.Printf("Content-Length: %d, BodyLength: %d", cLength, len(r.Body))
+		return len(data), nil
+
 	case requestDone:
 		return 0, fmt.Errorf("trying to read data in done state")
 
@@ -167,5 +192,3 @@ func (r *Request) parseSingle(data []byte) (int, error) {
 		return 0, fmt.Errorf("unknown state: %d", r.state)
 	}
 }
-
-func (r *Request) singleParse(data []byte) (int, error) { return 0, nil }

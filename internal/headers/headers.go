@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 type Headers map[string]string
@@ -18,6 +19,21 @@ func NewHeaders() Headers {
 func (h Headers) Set(key, value string) {
 	if v, ok := h[key]; ok {
 		h[key] = v + ", " + value
+		return
+	}
+	h[key] = value
+}
+
+func (h Headers) Get(key string) string {
+	key = strings.ToLower(key)
+	if _, ok := h[key]; !ok {
+		return ""
+	}
+	return h[key]
+}
+func (h Headers) OverrideHeader(key, value string) {
+	if _, ok := h[key]; ok {
+		h[key] = value
 		return
 	}
 	h[key] = value
