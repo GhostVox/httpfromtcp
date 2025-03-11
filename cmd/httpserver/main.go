@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
 	"strings"
 	"syscall"
 
@@ -48,6 +49,10 @@ func handler(w response.Writer, req *request.Request) {
 		proxyHandler(w, req)
 		return
 
+	}
+	if req.RequestLine.RequestTarget == "/video" {
+		handlerVideo(w, req)
+		return
 	}
 
 	handler200(w, req)
@@ -100,6 +105,66 @@ func handler500(w response.Writer, _ *request.Request) {
 	headers := response.GetDefaultHeaders(len(Message))
 	w.WriteHeaders(headers)
 	w.Writer.Write([]byte(Message))
+}
+
+func handlerVideo(w response.Writer, _ *request.Request) {
+	w.WriteStatusLine(response.Success)
+	h := response.GetDefaultHeaders(0)
+	h.Delete("Content-Length")
+	h.Delete("Content-Type")
+	h.Set("Content-Type", "video/mp4")
+	h.Set("Transfer-Encoding", "chunked")
+	h.Set("Connection", "keep-alive")
+	h.Set("Trailer", "X-Content-SHA256, X-Content-Length")
+	w.WriteHeaders(h)
+	directory, err := os.Getwd()
+	if err != nil {
+		log.Println("Error getting current directory: ", err)
+		return
+	}
+	filePath := path.Dir(directory) + "/httpfromtcp/assets/vim.mp4"
+	file, err := os.OpenFile(filePath, os.O_RDONLY, 0644)
+	if err != nil {
+		log.Println("Error opening file: ",
+			err)
+		return
+	}
+	defer file.Close()
+	buf := make([]byte, 1024)
+	hasher := sha256.New()
+	var allContent []byte
+	for {
+		n, err := file.Read(buf)
+		if n > 0 {
+
+			chunk := make([]byte, n)
+			copy(chunk, buf[:n])
+			allContent = append(allContent, chunk...)
+			_, writeErr := w.WriteChunkedBody(buf[:n])
+			if writeErr != nil {
+				log.Printf("Error writing chunk: %v", writeErr)
+				break
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				err := w.WriteChunkedBodyEnd()
+				if err != nil {
+					log.Printf("Error writing chunk end: %v", err)
+				}
+				break
+			}
+			log.Printf("Error reading from source: %v", err)
+			return
+		}
+	}
+	totalContent := len(allContent)
+	hash := hasher.Sum(nil)
+	trailers := headers.Headers{}
+	trailers.Set("X-Content-SHA256", fmt.Sprintf("%x", hash))
+	trailers.Set("X-Content-Length", fmt.Sprintf("%d", totalContent))
+	w.WriteTrailers(trailers)
+	log.Printf("Total content: %d bytes, SHA-256: %x", totalContent, hash)
 }
 
 func proxyHandler(w response.Writer, req *request.Request) {
@@ -180,7 +245,6 @@ func proxyHandler(w response.Writer, req *request.Request) {
 				err := w.WriteChunkedBodyEnd()
 				if err != nil {
 					log.Printf("Error writing chunk end: %v", err)
-					break
 				}
 				break
 			}

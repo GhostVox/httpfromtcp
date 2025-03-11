@@ -38,7 +38,9 @@ func (h Headers) OverrideHeader(key, value string) {
 	}
 	h[key] = value
 }
-
+func (h Headers) Delete(key string) {
+	delete(h, key)
+}
 func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 	idx := bytes.Index(data, []byte(clrf))
 	// check if the registered nurse is not found
